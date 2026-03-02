@@ -966,10 +966,11 @@ async def cb_my_deadlines(cb: CallbackQuery):
     
     kbd = []
     for r in rows[start:end]:
-        btxt = fmt_deadline(r).replace("<b>", "").replace("</b>", "")[:50]
+        emoji = {"pending": "⏳", "reminded": "🔔", "overdue": "🔴"}.get(r["status"], "❓")
+        btxt = f"{emoji} {r['subject']}"
         kbd.append([
-            InlineKeyboardButton(text=btxt, callback_data=f"view_deadline:{r['id']}:{page}")
-        ])
+        InlineKeyboardButton(text=btxt, callback_data=f"view_deadline:{r['id']}:{page}")
+    ])
     
     nav = []
     if page > 1:
