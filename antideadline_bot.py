@@ -684,19 +684,6 @@ async def cb_add_deadline(cb: CallbackQuery, state: FSMContext):
     await safe_edit(cb.message, "📚 <b>Шаг 1/5: Выберите предмет</b>", kbd)
     await cb.answer()
 
-@router.callback_query(F.data.startswith("subject_select:"))
-async def cb_subject_selected(cb: CallbackQuery, state: FSMContext):
-    subj = cb.data.split(":", 1)[1]
-    await state.update_data(subject=subj)
-    now = datetime.now()
-    await safe_edit(
-        cb.message,
-        f"📚 Предмет: <b>{subj}</b>\n\n📅 <b>Шаг 2/5: Выберите дату</b>",
-        kb_calendar(now.year, now.month)
-    )
-    await state.set_state(AddDeadlineStates.waiting_date)
-    await cb.answer()
-
 @router.callback_query(F.data.startswith("subject_new:"))
 async def cb_subject_new(cb: CallbackQuery, state: FSMContext):
     action = cb.data.split(":")[1]
