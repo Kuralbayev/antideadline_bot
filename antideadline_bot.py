@@ -524,8 +524,8 @@ def kb_hours() -> InlineKeyboardMarkup:
 def kb_subjects(user_id: int, page: int = 1, action: str = "select") -> InlineKeyboardMarkup:
     conn = db()
     c = conn.cursor()
-    c.execute("SELECT name FROM subjects WHERE user_id=? ORDER BY name", (user_id,))
-    subjects = [r["name"] for r in c.fetchall()]
+    c.execute("SELECT id, name FROM subjects WHERE user_id=? ORDER BY name", (user_id,))
+    subjects = c.fetchall()  # ← Теперь получаем ID тоже!
     conn.close()
     
     rows = []
@@ -543,9 +543,10 @@ def kb_subjects(user_id: int, page: int = 1, action: str = "select") -> InlineKe
         start = (page - 1) * ITEMS_PER_PAGE
         end = start + ITEMS_PER_PAGE
         
-        for s in subjects[start:end]:
-            cb = f"subject_{action}:{s}"
-            rows.append([InlineKeyboardButton(text=s, callback_data=cb)])
+        for subj in subjects[start:end]:
+            # ✅ ИСПОЛЬЗУЕМ ID ВМЕСТО НАЗВАНИЯ!
+            cb = f"subject_{action}:{subj['id']}"  # ← ИСПРАВЛЕНО!
+            rows.append([InlineKeyboardButton(text=subj['name'], callback_data=cb)])
         
         nav = []
         if page > 1:
@@ -700,6 +701,32 @@ async def cb_subject_new(cb: CallbackQuery, state: FSMContext):
         parse_mode="HTML"
     )
     await state.set_state(AddDeadlineStates.waiting_new_subject)
+    await cb.answer()@router.callback_query(F.data.startswith("subject_select:"))
+async def cb_subject_selected(cb: CallbackQuery, state: FSMContext):
+    # ✅ Получаем ID вместо названия
+    subject_id = int(cb.data.split(":", 1)[1])
+    
+    # ✅ Достаём название из базы по ID
+    conn = db()
+    c = conn.cursor()
+    c.execute("SELECT name FROM subjects WHERE id=?", (subject_id,))
+    row = c.fetchone()
+    conn.close()
+    
+    if not row:
+        await cb.answer("❌ Предмет не найден", show_alert=True)
+        return
+    
+    subj = row['name']
+    
+    await state.update_data(subject=subj)
+    now = datetime.now()
+    await safe_edit(
+        cb.message,
+        f"📚 Предмет: <b>{subj}</b>\n\n📅 <b>Шаг 2/5: Выберите дату</b>",
+        kb_calendar(now.year, now.month)
+    )
+    await state.set_state(AddDeadlineStates.waiting_date)
     await cb.answer()
 
 @router.message(AddDeadlineStates.waiting_new_subject)
