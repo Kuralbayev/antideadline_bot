@@ -525,7 +525,7 @@ def kb_subjects(user_id: int, page: int = 1, action: str = "select") -> InlineKe
     conn = db()
     c = conn.cursor()
     c.execute("SELECT id, name FROM subjects WHERE user_id=? ORDER BY name", (user_id,))
-    subjects = c.fetchall()  # ← Теперь получаем ID тоже!
+    subjects = c.fetchall()
     conn.close()
     
     rows = []
@@ -544,8 +544,7 @@ def kb_subjects(user_id: int, page: int = 1, action: str = "select") -> InlineKe
         end = start + ITEMS_PER_PAGE
         
         for subj in subjects[start:end]:
-            # ✅ ИСПОЛЬЗУЕМ ID ВМЕСТО НАЗВАНИЯ!
-            cb = f"subject_{action}:{subj['id']}"  # ← ИСПРАВЛЕНО!
+            cb = f"subject_{action}:{subj['id']}"
             rows.append([InlineKeyboardButton(text=subj['name'], callback_data=cb)])
         
         nav = []
@@ -563,6 +562,17 @@ def kb_subjects(user_id: int, page: int = 1, action: str = "select") -> InlineKe
     
     rows.append([InlineKeyboardButton(text="❌ Отменить", callback_data="main_menu")])
     return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+@router.callback_query(F.data.startswith("subjects_page:"))
+async def cb_subjects_page(cb: CallbackQuery):
+    parts = cb.data.split(":")
+    action = parts[1]
+    page = int(parts[2])
+    
+    kbd = kb_subjects(cb.from_user.id, page=page, action=action)
+    await safe_edit(cb.message, "📚 <b>Шаг 1/5: Выберите предмет</b>", kbd)
+    await cb.answer()
 
 def kb_subjects_menu():
     return InlineKeyboardMarkup(inline_keyboard=[
