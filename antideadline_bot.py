@@ -1266,24 +1266,187 @@ async def cb_subjects_menu(cb: CallbackQuery):
 async def cb_subjects_list(cb: CallbackQuery):
     conn = db()
     c = conn.cursor()
-    c.execute("SELECT name FROM subjects WHERE user_id=? ORDER BY name", (cb.from_user.id,))
-    subjects = [r["name"] for r in c.fetchall()]
+    c.execute("SELECT id, name FROM subjects WHERE user_id=? ORDER BY name", (cb.from_user.id,))
+    subjects = c.fetchall()
     conn.close()
     
     if not subjects:
         text = "📚 <b>Список предметов</b>\n\nУ вас пока нет предметов.\nСоздайте первый!"
+        kbd = InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="➕ Добавить предмет", callback_data="subject_add")],
+            [InlineKeyboardButton(text="🏠 Главное меню", callback_data="main_menu")]
+        ])
     else:
-        text = "📚 <b>Список предметов</b>\n\n"
+        text = "📚 <b>Список предметов</b>\n\nНажмите на предмет для редактирования:"
+        kbd_rows = []
         for s in subjects:
-            text += f"• {s}\n"
-    
-    kbd = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="➕ Добавить предмет", callback_data="subject_add")],
-        [InlineKeyboardButton(text="🏠 Главное меню", callback_data="main_menu")]
-    ])
+            kbd_rows.append([
+                InlineKeyboardButton(text=s['name'], callback_data=f"subject_actions:{s['id']}")
+            ])
+        kbd_rows.append([InlineKeyboardButton(text="➕ Добавить предмет", callback_data="subject_add")])
+        kbd_rows.append([InlineKeyboardButton(text="🏠 Главное меню", callback_data="main_menu")])
+        kbd = InlineKeyboardMarkup(inline_keyboard=kbd_rows)
     
     await safe_edit(cb.message, text, kbd)
     await cb.answer()
+
+@router.callback_query(F.data.startswith("subject_actions:"))
+async def cb_subject_actions(cb: CallbackQuery):
+    subject_id = int(cb.data.split(":")[1])
+    
+    conn = db()
+    c = conn.cursor()
+    c.execute("SELECT name FROM subjects WHERE id=? AND user_id=?", (subject_id, cb.from_user.id))
+    row = c.fetchone()
+    conn.close()
+    
+    if not row:
+        await cb.answer("❌ Предмет не найден", show_alert=True)
+        return
+    
+    kbd = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="✏️ Переименовать", callback_data=f"subject_rename:{subject_id}")],
+        [InlineKeyboardButton(text="🗑 Удалить", callback_data=f"subject_delete:{subject_id}")],
+        [InlineKeyboardButton(text="◀️ Назад", callback_data="subjects_list_view")]
+    ])
+    await safe_edit(cb.message, f"📚 <b>{row['name']}</b>\n\nВыберите действие:", kbd)
+    await cb.answer()
+
+
+@router.callback_query(F.data.startswith("subject_delete:"))
+async def cb_subject_delete_confirm(cb: CallbackQuery):
+    subject_id = int(cb.data.split(":")[1])
+    
+    conn = db()
+    c = conn.cursor()
+    c.execute("SELECT name FROM subjects WHERE id=? AND user_id=?", (subject_id, cb.from_user.id))
+    row = c.fetchone()
+    conn.close()
+    
+    if not row:
+        await cb.answer("❌ Предмет не найден", show_alert=True)
+        return
+    
+    kbd = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="✅ Да, удалить", callback_data=f"subject_delete_yes:{subject_id}")],
+        [InlineKeyboardButton(text="❌ Отмена", callback_data=f"subject_actions:{subject_id}")]
+    ])
+    await safe_edit(cb.message, f"🗑 <b>Удалить предмет «{row['name']}»?</b>\n\n⚠️ Дедлайны этого предмета останутся.", kbd)
+    await cb.answer()
+
+
+@router.callback_query(F.data.startswith("subject_delete_yes:"))
+async def cb_subject_delete_exec(cb: CallbackQuery):
+    subject_id = int(cb.data.split(":")[1])
+    
+    try:
+        conn = db()
+        c = conn.cursor()
+        c.execute("DELETE FROM subjects WHERE id=? AND user_id=?", (subject_id, cb.from_user.id))
+        conn.commit()
+        conn.close()
+        
+        await cb.answer("✅ Предмет удалён!")
+        
+        # Обновляем список
+        conn = db()
+        c = conn.cursor()
+        c.execute("SELECT id, name FROM subjects WHERE user_id=? ORDER BY name", (cb.from_user.id,))
+        subjects = c.fetchall()
+        conn.close()
+        
+        if not subjects:
+            text = "📚 <b>Список предметов</b>\n\nУ вас пока нет предметов.\nСоздайте первый!"
+            kbd = InlineKeyboardMarkup(inline_keyboard=[
+                [InlineKeyboardButton(text="➕ Добавить предмет", callback_data="subject_add")],
+                [InlineKeyboardButton(text="🏠 Главное меню", callback_data="main_menu")]
+            ])
+        else:
+            text = "📚 <b>Список предметов</b>\n\nНажмите на предмет для редактирования:"
+            kbd_rows = []
+            for s in subjects:
+                kbd_rows.append([InlineKeyboardButton(text=s['name'], callback_data=f"subject_actions:{s['id']}")])
+            kbd_rows.append([InlineKeyboardButton(text="➕ Добавить предмет", callback_data="subject_add")])
+            kbd_rows.append([InlineKeyboardButton(text="🏠 Главное меню", callback_data="main_menu")])
+            kbd = InlineKeyboardMarkup(inline_keyboard=kbd_rows)
+        
+        await safe_edit(cb.message, text, kbd)
+    
+    except Exception as e:
+        logger.error(e)
+        await cb.answer("❌ Ошибка удаления", show_alert=True)
+
+
+class EditSubjectStates(StatesGroup):
+    waiting_new_name = State()
+
+
+@router.callback_query(F.data.startswith("subject_rename:"))
+async def cb_subject_rename(cb: CallbackQuery, state: FSMContext):
+    subject_id = int(cb.data.split(":")[1])
+    
+    conn = db()
+    c = conn.cursor()
+    c.execute("SELECT name FROM subjects WHERE id=? AND user_id=?", (subject_id, cb.from_user.id))
+    row = c.fetchone()
+    conn.close()
+    
+    if not row:
+        await cb.answer("❌ Предмет не найден", show_alert=True)
+        return
+    
+    await state.update_data(rename_subject_id=subject_id, rename_subject_old=row['name'])
+    
+    try:
+        await cb.message.edit_reply_markup(reply_markup=None)
+    except:
+        pass
+    
+    await cb.message.answer(
+        f"✏️ <b>Переименовать предмет</b>\n\n"
+        f"Текущее название: <b>{row['name']}</b>\n\n"
+        f"Введите новое название ({MIN_SUBJECT_LENGTH}-{MAX_SUBJECT_LENGTH} символов):",
+        reply_markup=kb_cancel(),
+        parse_mode="HTML"
+    )
+    await state.set_state(EditSubjectStates.waiting_new_name)
+    await cb.answer()
+
+
+@router.message(EditSubjectStates.waiting_new_name)
+async def msg_subject_new_name(msg: Message, state: FSMContext):
+    ok, res = validate_subject(msg.text)
+    if not ok:
+        await msg.answer(f"{res}\n\nПопробуйте ещё раз:", reply_markup=kb_cancel())
+        return
+    
+    data = await state.get_data()
+    subject_id = data.get("rename_subject_id")
+    old_name = data.get("rename_subject_old")
+    
+    try:
+        conn = db()
+        c = conn.cursor()
+        c.execute(
+            "UPDATE subjects SET name=? WHERE id=? AND user_id=?",
+            (res, subject_id, msg.from_user.id)
+        )
+        conn.commit()
+        conn.close()
+        
+        await msg.answer(
+            f"✅ <b>Предмет переименован!</b>\n\n"
+            f"<s>{old_name}</s> → <b>{res}</b>",
+            reply_markup=kb_subjects_menu(),
+            parse_mode="HTML"
+        )
+        await state.clear()
+    
+    except sqlite3.IntegrityError:
+        await msg.answer("❌ Предмет с таким названием уже существует!", reply_markup=kb_cancel())
+    except Exception as e:
+        logger.error(e)
+        await msg.answer("❌ Ошибка сохранения", reply_markup=kb_cancel())
 
 @router.callback_query(F.data == "subject_add")
 async def cb_subject_add(cb: CallbackQuery, state: FSMContext):
