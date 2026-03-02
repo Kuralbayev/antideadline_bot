@@ -564,16 +564,6 @@ def kb_subjects(user_id: int, page: int = 1, action: str = "select") -> InlineKe
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
-@router.callback_query(F.data.startswith("subjects_page:"))
-async def cb_subjects_page(cb: CallbackQuery):
-    parts = cb.data.split(":")
-    action = parts[1]
-    page = int(parts[2])
-    
-    kbd = kb_subjects(cb.from_user.id, page=page, action=action)
-    await safe_edit(cb.message, "📚 <b>Шаг 1/5: Выберите предмет</b>", kbd)
-    await cb.answer()
-
 def kb_subjects_menu():
     return InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="📋 Список предметов", callback_data="subjects_list_view")],
@@ -634,6 +624,16 @@ def kb_rejected_payment():
 # ══════════════════════════════════════════════════════════════════════════════
 
 router = Router()
+
+@router.callback_query(F.data.startswith("subjects_page:"))
+async def cb_subjects_page(cb: CallbackQuery):
+    parts = cb.data.split(":")
+    action = parts[1]
+    page = int(parts[2])
+    
+    kbd = kb_subjects(cb.from_user.id, page=page, action=action)
+    await safe_edit(cb.message, "📚 <b>Шаг 1/5: Выберите предмет</b>", kbd)
+    await cb.answer()
 
 # ──────────────────────────────────────────────────────────────────────────────
 # COMMANDS
